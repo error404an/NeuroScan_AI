@@ -1,0 +1,1 @@
+No trained model is included yet. The MRI AI model will be developed and evaluated in a later phase.

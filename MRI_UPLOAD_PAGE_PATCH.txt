@@ -1,0 +1,131 @@
+# ===== MRI UPLOAD PAGE PATCH =====
+# In app.py:
+# 1) Add this import near your other imports:
+#       from mri_predictor import predict_mri_image
+# 2) Replace the entire existing `elif page == "MRI Upload":` section
+#    (up to, but not including, `elif page == "Patient Records":`) with
+#    the code below.
+
+elif page == "MRI Upload":
+    hero("MRI Image Upload & AI Research Analysis",
+         "Educational 2D MRI image classification prototype")
+
+    st.warning(
+        "Research/education only. This model is not clinically validated, "
+        "does not diagnose or rule out disease, and must not guide treatment."
+    )
+    st.caption(
+        "Only upload de-identified images that you are authorized to use. "
+        "This starter supports PNG/JPG/JPEG 2D image slices, not DICOM or 3D MRI."
+    )
+
+    if not db_ready:
+        st.error("MySQL is not connected. Check your .env settings and MySQL Server.")
+    else:
+        patients = get_patients()
+        if not patients:
+            st.info("First add a patient in Patient Records, then return here.")
+        else:
+            patient_options = {
+                f'{p["patient_id"]} — {p["full_name"]}': p["patient_id"]
+                for p in patients
+            }
+            selected_patient = st.selectbox(
+                "Select patient", list(patient_options.keys())
+            )
+            uploaded = st.file_uploader(
+                "Upload MRI image slice", type=["png", "jpg", "jpeg"]
+            )
+            notes = st.text_area("Notes (optional)")
+
+            if uploaded:
+                try:
+                    image = Image.open(uploaded).convert("RGB")
+                    st.image(image, caption="Uploaded MRI image slice",
+                             use_container_width=True)
+
+                    if st.button("Run educational AI analysis", type="primary"):
+                        try:
+                            with st.spinner("Running the saved CNN model..."):
+                                result = predict_mri_image(image)
+
+                            st.subheader("Model output")
+                            st.metric("Highest-scoring class",
+                                      result["predicted_class"].replace("_", " ").title())
+                            st.metric("Highest model score",
+                                      f'{result["top_score"]:.2f}%')
+
+                            st.subheader("Scores for all model classes")
+                            st.bar_chart(
+                                pd.DataFrame.from_dict(
+                                    result["class_scores"],
+                                    orient="index",
+                                    columns=["Model score (%)"]
+                                )
+                            )
+                            st.dataframe(
+                                pd.DataFrame([
+                                    {"Class": name, "Model score (%)": score}
+                                    for name, score in result["class_scores"].items()
+                                ]),
+                                use_container_width=True,
+                                hide_index=True
+                            )
+                            st.info(result["model_note"])
+
+                            st.session_state["neuroscan_last_result"] = result
+                            st.session_state["neuroscan_last_patient"] = (
+                                patient_options[selected_patient]
+                            )
+                            st.session_state["neuroscan_last_notes"] = notes.strip()
+                            st.session_state["neuroscan_last_image_name"] = (
+                                Path(uploaded.name).name
+                            )
+                        except Exception as exc:
+                            st.error(f"Could not run the model: {exc}")
+
+                    result = st.session_state.get("neuroscan_last_result")
+                    if (
+                        result
+                        and st.session_state.get("neuroscan_last_patient")
+                            == patient_options[selected_patient]
+                        and st.button("Save MRI and model output to MySQL")
+                    ):
+                        safe_name = Path(uploaded.name).name
+                        save_path = UPLOAD_DIR / safe_name
+                        if save_path.exists():
+                            save_path = UPLOAD_DIR / (
+                                f"{save_path.stem}_{os.urandom(3).hex()}{save_path.suffix}"
+                            )
+                        image.save(save_path)
+
+                        scan_id = add_scan_record(
+                            patient_options[selected_patient],
+                            save_path.name,
+                            st.session_state.get("neuroscan_last_notes", ""),
+                            prediction=result
+                        )
+                        st.success(
+                            f"MRI and educational model output saved. Scan record ID: {scan_id}"
+                        )
+                        st.caption(
+                            "The saved model score is not a clinical probability or diagnosis."
+                        )
+
+                except (UnidentifiedImageError, OSError):
+                    st.error("This file could not be opened as a supported image.")
+
+    st.subheader("MRI analysis history")
+    if db_ready:
+        try:
+            history = get_scan_records()
+            if history:
+                st.dataframe(
+                    pd.DataFrame(history),
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.info("No MRI records yet.")
+        except Exception as exc:
+            st.error(f"Could not load MRI history: {exc}")
