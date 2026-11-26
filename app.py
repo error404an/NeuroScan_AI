@@ -1,4 +1,10 @@
-
+from database import (
+    initialize_database,
+    add_patient,
+    get_patients,
+    add_scan_record,
+    get_scan_records
+)
 import os
 import json
 import numpy as np
@@ -19,10 +25,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-from database import (
-    initialize_database, add_patient, get_patients,
-    add_scan_record, get_scan_records
-)
+ 
 
 APP_DIR = Path(__file__).parent
 UPLOAD_DIR = APP_DIR / "uploads"
